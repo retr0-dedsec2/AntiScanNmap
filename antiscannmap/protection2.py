@@ -64,30 +64,49 @@ def reset_attack_timer():
 
     threading.Thread(target=check_timeout, daemon=True).start()
 
-# Fonction de détection des scans Nmap
+
+from collections import defaultdict
+
+# Table de suivi des connexions TCP (par IP + ports)
+connections = defaultdict(dict)
+
+def connection_exists(packet):
+    key = (packet[IP].src, packet[IP].dst, packet[TCP].sport, packet[TCP].dport)
+    return key in connections and connections[key] == "ESTABLISHED"
+
 def detect_nmap_scan(packet):
-    global attack_active, attack_ongoing, attacker_ip, victim_ip
+    global attacker_ip, victim_ip
 
     if packet.haslayer(TCP) and packet.haslayer(IP):
         attacker_ip = packet[IP].src
         victim_ip = packet[IP].dst
-
-        # Si l'IP est dans les ignorées, on ne déclenche pas d'alerte mais on continue la surveillance
-        if attacker_ip in IGNORED_IPS or victim_ip in IGNORED_IPS:
-            return
-
         tcp_flags = packet[TCP].flags
         suspicious_packet = False
 
-        # Détection des types de scans Nmap
+        # Mise à jour de l'état des connexions
+        key = (attacker_ip, victim_ip, packet[TCP].sport, packet[TCP].dport)
+
+        if tcp_flags == 0x02:  # SYN
+            connections[key] = "SYN_SENT"
+
+        elif tcp_flags == 0x12:  # SYN+ACK
+            connections[key] = "SYN_ACK"
+
+        elif tcp_flags == 0x10:  # ACK
+            if key in connections and connections[key] == "SYN_ACK":
+                connections[key] = "ESTABLISHED"
+            elif not connection_exists(packet):
+                suspicious_packet = True  # ACK scan
+
+        # Détection des scans
         if tcp_flags == 0x02:  
-            suspicious_packet = True  # Scan SYN
+            suspicious_packet = True  # SYN scan
         elif tcp_flags == 0x01:  
-            suspicious_packet = True  # Scan FIN
+            suspicious_packet = True  # FIN scan
         elif tcp_flags == 0x00:  
-            suspicious_packet = True  # Scan NULL
+            suspicious_packet = True  # NULL scan
         elif tcp_flags == 0x29:  
-            suspicious_packet = True  # Scan XMAS
+            suspicious_packet = True  # XMAS scan
 
         if suspicious_packet:
             suspicious_ips[attacker_ip] = suspicious_ips.get(attacker_ip, 0) + 1
@@ -95,7 +114,7 @@ def detect_nmap_scan(packet):
             if not attack_active and suspicious_ips[attacker_ip] >= ALERT_THRESHOLD:
                 attack_active = True
                 attack_ongoing = True
-                log_alert(f"[INFO] Attaque Nmap détectée : {attacker_ip} -> {victim_ip}")
+                log_alert(f"[INFO] Attaque Nmap détectée : {attacker_ip} -> {victim_ip} et le flags tcp: flags=0x{tcp_flags:02x}" )
                 reset_attack_timer()
 
 # Capture des paquets réseau
