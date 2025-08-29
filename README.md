@@ -199,7 +199,7 @@ Chaque alerte est enregistrée dans un fichier local `nmap_alerts.log`, au forma
 
 Pour ignorer une IP :
 ```python
-IGNORED_IPS = {"192.168.1.50", "192.168.1.51"}
+IGNORED_IPS = {""} # add a ip for ignored in a scanner
 ```
 > Les IP dans cette liste ne déclenchent pas d'alerte, mais sont toujours surveillées.
 
